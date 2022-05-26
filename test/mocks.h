@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2019 Nutanix Inc. All rights reserved.
+ * Copyright (c) 2020 Nutanix Inc. All rights reserved.
  *
  * Authors: Thanos Makatos <thanos@nutanix.com>
- *          Swapnil Ingle <swapnil.ingle@nutanix.com>
- *          Felipe Franciosi <felipe@nutanix.com>
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -30,34 +28,19 @@
  *
  */
 
-#ifndef LIB_VFIO_USER_PCI_H
-#define LIB_VFIO_USER_PCI_H
-
-#include "libvfio-user.h"
 #include "private.h"
 
-ssize_t
-pci_nonstd_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                  loff_t offset, bool is_write);
+void unpatch_all(void);
 
-ssize_t
-pci_config_space_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                        loff_t pos, bool is_write);
+void patch(const char *name);
 
+void mock_dma_register(vfu_ctx_t *vfu_ctx, vfu_dma_info_t *info);
 
-static inline size_t
-pci_config_space_size(vfu_ctx_t *vfu_ctx)
-{
-    return vfu_ctx->reg_info[VFU_PCI_DEV_CFG_REGION_IDX].size;
-}
+void mock_dma_unregister(vfu_ctx_t *vfu_ctx, vfu_dma_info_t *info);
 
-static inline uint8_t *
-pci_config_space_ptr(vfu_ctx_t *vfu_ctx, loff_t offset)
-{
-    assert((size_t)offset < pci_config_space_size(vfu_ctx));
-    return (uint8_t *)vfu_ctx->pci.config_space + offset;
-}
+int mock_reset_cb(vfu_ctx_t *vfu_ctx, vfu_reset_type_t type);
 
-#endif /* LIB_VFIO_USER_PCI_H */
+int mock_notify_migr_state_trans_cb(vfu_ctx_t *vfu_ctx,
+                                    vfu_migr_state_t vfu_state);
 
 /* ex: set tabstop=4 shiftwidth=4 softtabstop=4 expandtab: */

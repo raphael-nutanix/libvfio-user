@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Nutanix Inc. All rights reserved.
+ * Copyright (c) 2020 Nutanix Inc. All rights reserved.
  *
  * Authors: Thanos Makatos <thanos@nutanix.com>
  *          Swapnil Ingle <swapnil.ingle@nutanix.com>
@@ -30,34 +30,20 @@
  *
  */
 
-#ifndef LIB_VFIO_USER_PCI_H
-#define LIB_VFIO_USER_PCI_H
+#ifndef LIB_VFIO_USER_IRQ_H
+#define LIB_VFIO_USER_IRQ_H
 
-#include "libvfio-user.h"
 #include "private.h"
 
-ssize_t
-pci_nonstd_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                  loff_t offset, bool is_write);
+void
+irqs_reset(vfu_ctx_t *vfu_ctx);
 
-ssize_t
-pci_config_space_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                        loff_t pos, bool is_write);
+int
+handle_device_get_irq_info(vfu_ctx_t *vfu_ctx, vfu_msg_t *msg);
 
+int
+handle_device_set_irqs(vfu_ctx_t *vfu_ctx, vfu_msg_t *msg);
 
-static inline size_t
-pci_config_space_size(vfu_ctx_t *vfu_ctx)
-{
-    return vfu_ctx->reg_info[VFU_PCI_DEV_CFG_REGION_IDX].size;
-}
-
-static inline uint8_t *
-pci_config_space_ptr(vfu_ctx_t *vfu_ctx, loff_t offset)
-{
-    assert((size_t)offset < pci_config_space_size(vfu_ctx));
-    return (uint8_t *)vfu_ctx->pci.config_space + offset;
-}
-
-#endif /* LIB_VFIO_USER_PCI_H */
+#endif /* LIB_VFIO_USER_IRQ_H */
 
 /* ex: set tabstop=4 shiftwidth=4 softtabstop=4 expandtab: */

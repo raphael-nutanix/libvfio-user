@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Nutanix Inc. All rights reserved.
+ * Copyright (c) 2021 Nutanix Inc. All rights reserved.
  *
  * Authors: Thanos Makatos <thanos@nutanix.com>
  *          Swapnil Ingle <swapnil.ingle@nutanix.com>
@@ -30,34 +30,14 @@
  *
  */
 
-#ifndef LIB_VFIO_USER_PCI_H
-#define LIB_VFIO_USER_PCI_H
+#ifndef LIB_VFIO_USER_TRAN_PIPE_H
+#define LIB_VFIO_USER_TRAN_PIPE_H
 
 #include "libvfio-user.h"
-#include "private.h"
+#include "tran.h"
 
-ssize_t
-pci_nonstd_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                  loff_t offset, bool is_write);
+extern struct transport_ops tran_pipe_ops;
 
-ssize_t
-pci_config_space_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                        loff_t pos, bool is_write);
-
-
-static inline size_t
-pci_config_space_size(vfu_ctx_t *vfu_ctx)
-{
-    return vfu_ctx->reg_info[VFU_PCI_DEV_CFG_REGION_IDX].size;
-}
-
-static inline uint8_t *
-pci_config_space_ptr(vfu_ctx_t *vfu_ctx, loff_t offset)
-{
-    assert((size_t)offset < pci_config_space_size(vfu_ctx));
-    return (uint8_t *)vfu_ctx->pci.config_space + offset;
-}
-
-#endif /* LIB_VFIO_USER_PCI_H */
+#endif /* LIB_VFIO_USER_TRAN_PIPE_H */
 
 /* ex: set tabstop=4 shiftwidth=4 softtabstop=4 expandtab: */

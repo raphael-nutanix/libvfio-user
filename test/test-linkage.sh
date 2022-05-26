@@ -1,9 +1,8 @@
+#!/bin/bash
 #
-# Copyright (c) 2019 Nutanix Inc. All rights reserved.
+# Copyright (c) 2022 Nutanix Inc. All rights reserved.
 #
-# Authors: Thanos Makatos <thanos@nutanix.com>
-#          Swapnil Ingle <swapnil.ingle@nutanix.com>
-#          Felipe Franciosi <felipe@nutanix.com>
+# Authors: John Levon <john.levon@nutanix.com>
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -28,28 +27,25 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-BUILD_DIR = $(CURDIR)/build
+#
+# A crappy way to check all "public" symbols are exported.
+#
 
-.PHONY: all install test coverity pre-push clean tags
+set -e
 
-all:
-	test -d $(BUILD_DIR) || meson $(BUILD_DIR)
-	ninja -C $(BUILD_DIR)
+header="$1/include/libvfio-user.h"
+libdir="$2/lib"
+cc="$3"
 
-install:
-	ninja -C $(BUILD_DIR) install
+tmpfile=$(mktemp /tmp/libvfio-user.test-linkage.XXXXXX.c)
+cat >$tmpfile <<EOF
+int main() {
 
-test: all
-	meson test -C $(BUILD_DIR)
+$(egrep '^[a-z_0-9]+\(' $header | sed 's+(.*+();+;')
 
-pre-push:
-	.github/workflows/pull_request.sh
+}
+EOF
 
-coverity:
-	.github/workflows/coverity.sh
+$cc -Wno-implicit-function-declaration -o /dev/null $tmpfile $libdir/libvfio-user.so
 
-clean:
-	rm -rf $(BUILD_DIR)
-
-tags: all
-	ninja -C $(BUILD_DIR) ctags
+rm $tmpfile

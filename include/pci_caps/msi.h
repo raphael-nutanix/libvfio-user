@@ -30,34 +30,48 @@
  *
  */
 
-#ifndef LIB_VFIO_USER_PCI_H
-#define LIB_VFIO_USER_PCI_H
+#ifndef LIB_VFIO_USER_PCI_CAPS_MSI_H
+#define LIB_VFIO_USER_PCI_CAPS_MSI_H
 
-#include "libvfio-user.h"
-#include "private.h"
+#include "common.h"
 
-ssize_t
-pci_nonstd_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                  loff_t offset, bool is_write);
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-ssize_t
-pci_config_space_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                        loff_t pos, bool is_write);
+struct mc {
+    unsigned int msie:1;
+    unsigned int mmc:3;
+    unsigned int mme:3;
+    unsigned int c64:1;
+    unsigned int pvm:1;
+    unsigned int res1:7;
+} __attribute__ ((packed));
+_Static_assert(sizeof(struct mc) == 0x2, "bad MC size");
 
+struct ma {
+    unsigned int res1:2;
+    unsigned int addr:30;
+} __attribute__ ((packed));
+_Static_assert(sizeof(struct ma) == 0x4, "bad MA size");
 
-static inline size_t
-pci_config_space_size(vfu_ctx_t *vfu_ctx)
-{
-    return vfu_ctx->reg_info[VFU_PCI_DEV_CFG_REGION_IDX].size;
+struct msicap {
+    struct cap_hdr hdr;
+    struct mc mc;
+    struct ma ma;
+    uint32_t mua;
+    uint16_t md;
+    uint16_t padding;
+    uint32_t mmask;
+    uint32_t mpend;
+}  __attribute__ ((packed));
+_Static_assert(sizeof(struct msicap) == 0x18, "bad MSICAP size");
+_Static_assert(offsetof(struct msicap, hdr) == 0, "bad offset");
+
+#ifdef __cplusplus
 }
+#endif
 
-static inline uint8_t *
-pci_config_space_ptr(vfu_ctx_t *vfu_ctx, loff_t offset)
-{
-    assert((size_t)offset < pci_config_space_size(vfu_ctx));
-    return (uint8_t *)vfu_ctx->pci.config_space + offset;
-}
-
-#endif /* LIB_VFIO_USER_PCI_H */
+#endif /* VFU_CAP_MSI_H */
 
 /* ex: set tabstop=4 shiftwidth=4 softtabstop=4 expandtab: */

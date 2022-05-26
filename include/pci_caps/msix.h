@@ -30,34 +30,52 @@
  *
  */
 
-#ifndef LIB_VFIO_USER_PCI_H
-#define LIB_VFIO_USER_PCI_H
+#ifndef LIB_VFIO_USER_PCI_CAPS_MSIX_H
+#define LIB_VFIO_USER_PCI_CAPS_MSIX_H
 
-#include "libvfio-user.h"
-#include "private.h"
+#include <linux/pci_regs.h>
 
-ssize_t
-pci_nonstd_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                  loff_t offset, bool is_write);
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-ssize_t
-pci_config_space_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                        loff_t pos, bool is_write);
+/* Message Control for MSI-X */
+struct mxc {
+	uint16_t ts:11;         /* RO */
+	uint16_t reserved:3;    /* read must return 0, write has no effect */
+	uint16_t fm:1;          /* RW */
+	uint16_t mxe:1;         /* RW */
+} __attribute__ ((packed));
+_Static_assert(sizeof(struct mxc) == PCI_MSIX_FLAGS, "bad MXC size");
 
+/* Table Offset / Table BIR for MSI-X */
+struct mtab {
+	uint32_t tbir:3;    /* RO */
+	uint32_t to:29;     /* RO */
+} __attribute__ ((packed));
+_Static_assert(sizeof(struct mtab) == PCI_MSIX_TABLE, "bad MTAB size");
 
-static inline size_t
-pci_config_space_size(vfu_ctx_t *vfu_ctx)
-{
-    return vfu_ctx->reg_info[VFU_PCI_DEV_CFG_REGION_IDX].size;
+/* PBA Offset / PBA BIR for MSI-X */
+struct mpba {
+	uint32_t pbir:3;    /* RO */
+	uint32_t pbao:29;   /* RO */
+} __attribute__ ((packed));
+_Static_assert(sizeof(struct mtab) == PCI_MSIX_PBA - PCI_MSIX_TABLE,
+               "bad MPBA size");
+
+struct msixcap {
+    struct cap_hdr hdr;
+	struct mxc mxc;
+	struct mtab mtab;
+	struct mpba mpba;
+} __attribute__ ((packed)) __attribute__ ((aligned(4)));
+_Static_assert(sizeof(struct msixcap) == PCI_CAP_MSIX_SIZEOF, "bad MSI-X size");
+_Static_assert(offsetof(struct msixcap, hdr) == 0, "bad offset");
+
+#ifdef __cplusplus
 }
+#endif
 
-static inline uint8_t *
-pci_config_space_ptr(vfu_ctx_t *vfu_ctx, loff_t offset)
-{
-    assert((size_t)offset < pci_config_space_size(vfu_ctx));
-    return (uint8_t *)vfu_ctx->pci.config_space + offset;
-}
-
-#endif /* LIB_VFIO_USER_PCI_H */
+#endif /* VFU_CAP_MSIX_H */
 
 /* ex: set tabstop=4 shiftwidth=4 softtabstop=4 expandtab: */

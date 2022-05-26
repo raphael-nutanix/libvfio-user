@@ -30,12 +30,21 @@
  *
  */
 
-#ifndef __COMMON_H__
-#define __COMMON_H__
+/*
+ * Private utilities used by the library and sample/test code.
+ */
 
+#ifndef LIB_VFIO_USER_COMMON_H
+#define LIB_VFIO_USER_COMMON_H
+
+#include <limits.h>
 #include <stdint.h>
 
-#define PAGE_SIZE           sysconf(_SC_PAGE_SIZE)
+#define UNUSED __attribute__((unused))
+#define EXPORT __attribute__((visibility("default")))
+
+#define ONE_TB              (1024UL * 1024 * 1024 * 1024)
+#define PAGE_SIZE           (size_t)sysconf(_SC_PAGE_SIZE)
 #define PAGE_ALIGNED(x)		(((x) & ((typeof(x))(PAGE_SIZE) - 1)) == 0)
 
 #define BIT(nr)             (1UL << (nr))
@@ -45,20 +54,48 @@
 #define likely(e)   __builtin_expect(!!(e), 1)
 #define unlikely(e) __builtin_expect(e, 0)
 
+/* XXX NB 2nd argument must be power of two */
 #define ROUND_DOWN(x, a)    ((x) & ~((a)-1))
 #define ROUND_UP(x,a)       ROUND_DOWN((x)+(a)-1, a)
 
-void
-lm_log(lm_ctx_t *lm_ctx, lm_log_lvl_t lvl, const char *fmt, ...);
+/* Saturating uint64_t addition. */
+static inline uint64_t
+satadd_u64(uint64_t a, uint64_t b)
+{
+    uint64_t res = a + b;
+    return (res < a) ? UINT64_MAX : res;
+}
 
-#ifdef DEBUG
-void
-dump_buffer(lm_ctx_t *lm_ctx, const char *prefix,
-            const char *buf, uint32_t count);
-#else
-#define dump_buffer(lm_ctx, prefix, buf, count)
-#endif
+/*
+ * The size, in bytes, of the bitmap that represents the given range with the
+ * given page size.
+ */
+static inline size_t
+_get_bitmap_size(size_t size, size_t pgsize)
+{
+    size_t nr_pages = (size / pgsize) + (size % pgsize != 0);
+    return ROUND_UP(nr_pages, sizeof(uint64_t) * CHAR_BIT) / CHAR_BIT;
+}
 
-#endif /* __COMMON_H__ */
+#ifdef UNIT_TEST
+
+#define MOCK_DEFINE(f) \
+    (__real_ ## f)
+
+#define MOCK_DECLARE(r, f, ...) \
+    r f(__VA_ARGS__); \
+    r __real_ ## f(__VA_ARGS__); \
+    r __wrap_ ## f(__VA_ARGS__);
+
+#else /* UNIT_TEST */
+
+#define MOCK_DEFINE(f) (f)
+
+#define MOCK_DECLARE(r, f, ...) \
+    r f(__VA_ARGS__);
+
+#endif /* UNIT_TEST */
+
+#endif /* LIB_VFIO_USER_COMMON_H */
 
 /* ex: set tabstop=4 shiftwidth=4 softtabstop=4 expandtab: */

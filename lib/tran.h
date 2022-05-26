@@ -30,34 +30,53 @@
  *
  */
 
-#ifndef LIB_VFIO_USER_PCI_H
-#define LIB_VFIO_USER_PCI_H
+#ifndef LIB_VFIO_USER_TRAN_H
+#define LIB_VFIO_USER_TRAN_H
 
 #include "libvfio-user.h"
 #include "private.h"
 
-ssize_t
-pci_nonstd_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                  loff_t offset, bool is_write);
+struct transport_ops {
+    int (*init)(vfu_ctx_t *vfu_ctx);
 
-ssize_t
-pci_config_space_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                        loff_t pos, bool is_write);
+    int (*get_poll_fd)(vfu_ctx_t *vfu_ctx);
 
+    int (*attach)(vfu_ctx_t *vfu_ctx);
 
-static inline size_t
-pci_config_space_size(vfu_ctx_t *vfu_ctx)
-{
-    return vfu_ctx->reg_info[VFU_PCI_DEV_CFG_REGION_IDX].size;
-}
+    int (*get_request_header)(vfu_ctx_t *vfu_ctx, struct vfio_user_header *hdr,
+                              int *fds, size_t *nr_fds);
 
-static inline uint8_t *
-pci_config_space_ptr(vfu_ctx_t *vfu_ctx, loff_t offset)
-{
-    assert((size_t)offset < pci_config_space_size(vfu_ctx));
-    return (uint8_t *)vfu_ctx->pci.config_space + offset;
-}
+    int (*recv_body)(vfu_ctx_t *vfu_ctx, vfu_msg_t *msg);
 
-#endif /* LIB_VFIO_USER_PCI_H */
+    int (*reply)(vfu_ctx_t *vfu_ctx, vfu_msg_t *msg, int err);
+
+    int (*recv_msg)(vfu_ctx_t *vfu_ctx, vfu_msg_t *msg);
+
+    int (*send_msg)(vfu_ctx_t *vfu_ctx, uint16_t msg_id,
+                    enum vfio_user_command cmd,
+                    void *send_data, size_t send_len,
+                    struct vfio_user_header *hdr,
+                    void *recv_data, size_t recv_len);
+
+    void (*detach)(vfu_ctx_t *vfu_ctx);
+    void (*fini)(vfu_ctx_t *vfu_ctx);
+};
+
+/* The largest number of fd's we are prepared to receive. */
+// FIXME: value?
+#define VFIO_USER_CLIENT_MAX_MSG_FDS_LIMIT (1024)
+
+/*
+ * Parse JSON supplied from the other side into the known parameters. Note: they
+ * will not be set if not found in the JSON.
+ */
+int
+tran_parse_version_json(const char *json_str, int *client_max_fdsp,
+                        size_t *client_max_data_xfer_sizep, size_t *pgsizep);
+
+int
+tran_negotiate(vfu_ctx_t *vfu_ctx);
+
+#endif /* LIB_VFIO_USER_TRAN_H */
 
 /* ex: set tabstop=4 shiftwidth=4 softtabstop=4 expandtab: */

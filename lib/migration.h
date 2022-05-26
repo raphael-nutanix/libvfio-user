@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2019 Nutanix Inc. All rights reserved.
+ * Copyright (c) 2020 Nutanix Inc. All rights reserved.
  *
  * Authors: Thanos Makatos <thanos@nutanix.com>
- *          Swapnil Ingle <swapnil.ingle@nutanix.com>
- *          Felipe Franciosi <felipe@nutanix.com>
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -30,34 +28,53 @@
  *
  */
 
-#ifndef LIB_VFIO_USER_PCI_H
-#define LIB_VFIO_USER_PCI_H
+
+// FIXME: license header (and SPDX ?) everywhere
+
+#ifndef LIB_VFIO_USER_MIGRATION_H
+#define LIB_VFIO_USER_MIGRATION_H
+
+/*
+ * These are not public routines, but for convenience, they are used by the
+ * sample/test code as well as privately within libvfio-user.
+ */
+
+#include <stddef.h>
 
 #include "libvfio-user.h"
 #include "private.h"
 
-ssize_t
-pci_nonstd_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                  loff_t offset, bool is_write);
+struct migration *
+init_migration(const vfu_migration_callbacks_t *callbacks,
+               uint64_t data_offset, int *err);
 
 ssize_t
-pci_config_space_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
+migration_region_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
                         loff_t pos, bool is_write);
 
+bool
+migration_available(vfu_ctx_t *vfu_ctx);
 
-static inline size_t
-pci_config_space_size(vfu_ctx_t *vfu_ctx)
-{
-    return vfu_ctx->reg_info[VFU_PCI_DEV_CFG_REGION_IDX].size;
-}
+MOCK_DECLARE(bool, device_is_stopped, struct migration *migr);
 
-static inline uint8_t *
-pci_config_space_ptr(vfu_ctx_t *vfu_ctx, loff_t offset)
-{
-    assert((size_t)offset < pci_config_space_size(vfu_ctx));
-    return (uint8_t *)vfu_ctx->pci.config_space + offset;
-}
+MOCK_DECLARE(bool, device_is_stopped_and_copying, struct migration *migration);
 
-#endif /* LIB_VFIO_USER_PCI_H */
+size_t
+migration_get_pgsize(struct migration *migr);
+
+int
+migration_set_pgsize(struct migration *migr, size_t pgsize);
+
+MOCK_DECLARE(bool, vfio_migr_state_transition_is_valid, uint32_t from,
+             uint32_t to);
+
+MOCK_DECLARE(ssize_t, handle_device_state, vfu_ctx_t *vfu_ctx,
+             struct migration *migr, uint32_t device_state, bool notify);
+
+bool
+access_migration_needs_quiesce(const vfu_ctx_t *vfu_ctx, size_t region_index,
+                              uint64_t offset);
+
+#endif /* LIB_VFIO_USER_MIGRATION_H */
 
 /* ex: set tabstop=4 shiftwidth=4 softtabstop=4 expandtab: */

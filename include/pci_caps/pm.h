@@ -30,34 +30,64 @@
  *
  */
 
-#ifndef LIB_VFIO_USER_PCI_H
-#define LIB_VFIO_USER_PCI_H
+#ifndef LIB_VFIO_USER_PCI_CAPS_PM_H
+#define LIB_VFIO_USER_PCI_CAPS_PM_H
 
-#include "libvfio-user.h"
-#include "private.h"
+#include "common.h"
 
-ssize_t
-pci_nonstd_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                  loff_t offset, bool is_write);
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-ssize_t
-pci_config_space_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                        loff_t pos, bool is_write);
+/*
+ * Power Management Capabilities Register
+ */
+struct pc {
+    uint16_t vs:3;
+    uint16_t pmec:1;
+    uint16_t res:1;
+    uint16_t dsi:1;
+    uint16_t auxc:3;
+    uint16_t d1s:1;
+    uint16_t d2s:1;
+    uint16_t psup:5;
+} __attribute__((packed));
+_Static_assert(sizeof(struct pc) == 0x2, "bad PC size");
 
+/*
+ * Power Management Status and Control Register
+ */
+struct pmcs {
+    union {
+        uint16_t raw;
+        struct {
+            uint16_t ps:2;
+            uint16_t res1:1;
+            uint16_t nsfrst:1;
+            uint16_t res2:4;
+            uint16_t pmee:1;
+            uint16_t dse:4;
+            uint16_t dsc:2;
+            uint16_t pmes:1;
+        };
+    };
+} __attribute__((packed));
+_Static_assert(sizeof(struct pmcs) == 0x2, "bad PMCS size");
 
-static inline size_t
-pci_config_space_size(vfu_ctx_t *vfu_ctx)
-{
-    return vfu_ctx->reg_info[VFU_PCI_DEV_CFG_REGION_IDX].size;
+struct pmcap {
+    struct cap_hdr hdr;
+    struct pc pc;
+    struct pmcs pmcs;
+    uint8_t pmcsr_bse;
+    uint8_t data;
+} __attribute__((packed));
+_Static_assert(sizeof(struct pmcap) == PCI_PM_SIZEOF, "bad pmcap size");
+_Static_assert(offsetof(struct pmcap, hdr) == 0, "bad offset");
+
+#ifdef __cplusplus
 }
+#endif
 
-static inline uint8_t *
-pci_config_space_ptr(vfu_ctx_t *vfu_ctx, loff_t offset)
-{
-    assert((size_t)offset < pci_config_space_size(vfu_ctx));
-    return (uint8_t *)vfu_ctx->pci.config_space + offset;
-}
-
-#endif /* LIB_VFIO_USER_PCI_H */
+#endif /* VFU_CAP_PM_H */
 
 /* ex: set tabstop=4 shiftwidth=4 softtabstop=4 expandtab: */

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2019 Nutanix Inc. All rights reserved.
+ * Copyright (c) 2020 Nutanix Inc. All rights reserved.
  *
  * Authors: Thanos Makatos <thanos@nutanix.com>
- *          Swapnil Ingle <swapnil.ingle@nutanix.com>
- *          Felipe Franciosi <felipe@nutanix.com>
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -30,34 +28,55 @@
  *
  */
 
-#ifndef LIB_VFIO_USER_PCI_H
-#define LIB_VFIO_USER_PCI_H
+#ifndef LIB_VFIO_USER_PCI_CAPS_COMMON_H
+#define LIB_VFIO_USER_PCI_CAPS_COMMON_H
 
-#include "libvfio-user.h"
-#include "private.h"
+#include <linux/pci_regs.h>
+#include <stddef.h>
 
-ssize_t
-pci_nonstd_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                  loff_t offset, bool is_write);
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-ssize_t
-pci_config_space_access(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
-                        loff_t pos, bool is_write);
+struct cap_hdr {
+    uint8_t id;
+    uint8_t next;
+} __attribute__((packed));
+_Static_assert(sizeof(struct cap_hdr) == 0x2, "bad PCI capability header size");
+_Static_assert(offsetof(struct cap_hdr, id) == PCI_CAP_LIST_ID, "bad offset");
+_Static_assert(offsetof(struct cap_hdr, next) == PCI_CAP_LIST_NEXT, "bad offset");
 
+/*
+ * Vendor-specific capability
+ */
+struct vsc {
+    struct cap_hdr  hdr;
+    uint8_t         size;
+    uint8_t         data[];
+} __attribute__ ((packed));
 
-static inline size_t
-pci_config_space_size(vfu_ctx_t *vfu_ctx)
-{
-    return vfu_ctx->reg_info[VFU_PCI_DEV_CFG_REGION_IDX].size;
+/*
+ * PCI Express extended capability header.
+ */
+struct pcie_ext_cap_hdr {
+    uint32_t id:16;
+    uint32_t version:4;
+    uint32_t next:12;
+} __attribute__((packed));
+
+/* PCI Express vendor-specific capability header (PCIE 7.19) */
+struct pcie_ext_cap_vsc_hdr {
+    struct pcie_ext_cap_hdr hdr;
+    uint32_t id:16;
+    uint32_t rev:4;
+    uint32_t len:12;
+    uint8_t      data[];
+} __attribute__((packed));
+
+#ifdef __cplusplus
 }
+#endif
 
-static inline uint8_t *
-pci_config_space_ptr(vfu_ctx_t *vfu_ctx, loff_t offset)
-{
-    assert((size_t)offset < pci_config_space_size(vfu_ctx));
-    return (uint8_t *)vfu_ctx->pci.config_space + offset;
-}
-
-#endif /* LIB_VFIO_USER_PCI_H */
+#endif /* LIB_VFIO_USER_PCI_CAPS_COMMON_H */
 
 /* ex: set tabstop=4 shiftwidth=4 softtabstop=4 expandtab: */
