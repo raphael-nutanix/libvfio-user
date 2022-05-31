@@ -165,14 +165,27 @@ bit_to_u8off(size_t val)
 }
 
 static inline void
+apply_byte_mask_to_bitmap(uint8_t *bitmap, uint8_t byte_mask)
+{
+    __atomic_or_fetch(bitmap, byte_mask, __ATOMIC_SEQ_CST);
+}
+
+static inline void
+u8_set_all(uint8_t *bm)
+{
+    *bm = ~0;
+}
+
+static inline void
 _dma_mark_dirty(const dma_controller_t *dma, const dma_memory_region_t *region,
                 dma_sg_t *sg)
 {
-    size_t index;
-    size_t end;
+    size_t sg_start;
+    size_t sg_end;
     size_t pgstart;
     size_t pgend;
     size_t i;
+    uint8_t bm;
 
     assert(dma != NULL);
     assert(region != NULL);
@@ -182,23 +195,29 @@ _dma_mark_dirty(const dma_controller_t *dma, const dma_memory_region_t *region,
     range_to_pages(sg->offset, sg->length, dma->dirty_pgsize,
                    &pgstart, &pgend);
 
-    index = bit_to_u8(pgstart);
-    end = bit_to_u8(pgend) + !!(bit_to_u8off(pgend));
+    sg_start = bit_to_u8(pgstart);
+    sg_end = bit_to_u8(pgend) + !!(bit_to_u8off(pgend));
 
-    for (i = index; i < end; i++) {
-        uint8_t bm = ~0;
+    assert(sg_start <= sg_end);
 
-        /* Mask off any pages in the first u8 that aren't in the range. */
-        if (i == index && bit_to_u8off(pgstart) != 0) {
-            bm &= ~((1 << bit_to_u8off(pgstart)) - 1);
-        }
+    /* Mask off any pages in the first u8 that aren't in the range. */
+    if (bit_to_u8off(pgstart) != 0) {
+        u8_set_all(&bm);
+        bm &= ~((1 << bit_to_u8off(pgstart)) - 1);
+        apply_byte_mask_to_bitmap(&region->dirty_bitmap[sg_start], bm);
+    }
 
-        /* Mask off any pages in the last u8 that aren't in the range. */
-        if (i == end - 1 && bit_to_u8off(pgend) != 0) {
-            bm &= ((1 << bit_to_u8off(pgend)) - 1);
-        }
+    /* Set all 1's to any of the pages in the middle u8s of the range. */
+    u8_set_all(&bm);
+    for (i = sg_start + 1; i < sg_end - 1; i++) {
+        apply_byte_mask_to_bitmap(&region->dirty_bitmap[i], bm);
+    }
 
-        __atomic_or_fetch(&region->dirty_bitmap[i], bm, __ATOMIC_SEQ_CST);
+    /* Mask off any pages in the last u8 that aren't in the range. */
+    if (bit_to_u8off(pgend) != 0) {
+        u8_set_all(&bm);
+        bm &= ((1 << bit_to_u8off(pgend)) - 1);
+        apply_byte_mask_to_bitmap(&region->dirty_bitmap[sg_end - 1], bm);
     }
 }
 
