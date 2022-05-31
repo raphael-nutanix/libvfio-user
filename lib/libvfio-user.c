@@ -1310,6 +1310,16 @@ command_needs_quiesce(vfu_ctx_t *vfu_ctx, const vfu_msg_t *msg)
     case VFIO_USER_DEVICE_RESET:
         return true;
 
+    case VFIO_USER_DIRTY_PAGES: {
+        struct vfio_user_dirty_pages *dirty_pages = msg->in.iov.iov_base;
+
+        if (msg->in.iov.iov_len < sizeof(*dirty_pages)) {
+            return false;
+        }
+
+        return !(dirty_pages->flags & VFIO_IOMMU_DIRTY_PAGES_FLAG_GET_BITMAP);
+    }
+
     case VFIO_USER_REGION_WRITE:
         if (msg->in.iov.iov_len < sizeof(*reg)) {
             /*
@@ -1745,8 +1755,7 @@ vfu_get_poll_fd(vfu_ctx_t *vfu_ctx)
 EXPORT int
 vfu_setup_log(vfu_ctx_t *vfu_ctx, vfu_log_fn_t *log, int log_level)
 {
-
-    if (log_level != LOG_ERR && log_level != LOG_INFO && log_level != LOG_DEBUG) {
+    if (log_level < LOG_EMERG || log_level > LOG_DEBUG) {
         return ERROR_INT(EINVAL);
     }
 
@@ -2000,8 +2009,8 @@ quiesce_check_allowed(vfu_ctx_t *vfu_ctx)
 }
 
 EXPORT int
-vfu_addr_to_sg(vfu_ctx_t *vfu_ctx, vfu_dma_addr_t dma_addr,
-               size_t len, dma_sg_t *sg, int max_sg, int prot)
+vfu_addr_to_sgl(vfu_ctx_t *vfu_ctx, vfu_dma_addr_t dma_addr,
+                size_t len, dma_sg_t *sgl, size_t max_nr_sgs, int prot)
 {
     assert(vfu_ctx != NULL);
 
@@ -2011,31 +2020,24 @@ vfu_addr_to_sg(vfu_ctx_t *vfu_ctx, vfu_dma_addr_t dma_addr,
 
     quiesce_check_allowed(vfu_ctx);
 
-    return dma_addr_to_sg(vfu_ctx->dma, dma_addr, len, sg, max_sg, prot);
+    return dma_addr_to_sgl(vfu_ctx->dma, dma_addr, len, sgl, max_nr_sgs, prot);
 }
 
 EXPORT int
-vfu_map_sg(vfu_ctx_t *vfu_ctx, dma_sg_t *sg, struct iovec *iov, int cnt,
-           int flags)
+vfu_sgl_get(vfu_ctx_t *vfu_ctx, dma_sg_t *sgl, struct iovec *iov, size_t cnt,
+            int flags)
 {
-    int ret;
-
     if (unlikely(vfu_ctx->dma_unregister == NULL) || flags != 0) {
         return ERROR_INT(EINVAL);
     }
 
     quiesce_check_allowed(vfu_ctx);
 
-    ret = dma_map_sg(vfu_ctx->dma, sg, iov, cnt);
-    if (ret < 0) {
-        return -1;
-    }
-
-    return 0;
+    return dma_sgl_get(vfu_ctx->dma, sgl, iov, cnt);
 }
 
 EXPORT void
-vfu_unmap_sg(vfu_ctx_t *vfu_ctx, dma_sg_t *sg, struct iovec *iov, int cnt)
+vfu_sgl_mark_dirty(vfu_ctx_t *vfu_ctx, dma_sg_t *sgl, size_t cnt)
 {
     if (unlikely(vfu_ctx->dma_unregister == NULL)) {
         return;
@@ -2043,7 +2045,20 @@ vfu_unmap_sg(vfu_ctx_t *vfu_ctx, dma_sg_t *sg, struct iovec *iov, int cnt)
 
     quiesce_check_allowed(vfu_ctx);
 
-    return dma_unmap_sg(vfu_ctx->dma, sg, iov, cnt);
+    return dma_sgl_mark_dirty(vfu_ctx->dma, sgl, cnt);
+}
+
+EXPORT void
+vfu_sgl_put(vfu_ctx_t *vfu_ctx, dma_sg_t *sgl,
+            struct iovec *iov UNUSED, size_t cnt)
+{
+    if (unlikely(vfu_ctx->dma_unregister == NULL)) {
+        return;
+    }
+
+    quiesce_check_allowed(vfu_ctx);
+
+    return dma_sgl_put(vfu_ctx->dma, sgl, cnt);
 }
 
 static int
@@ -2140,17 +2155,29 @@ vfu_dma_transfer(vfu_ctx_t *vfu_ctx, enum vfio_user_command cmd,
 }
 
 EXPORT int
-vfu_dma_read(vfu_ctx_t *vfu_ctx, dma_sg_t *sg, void *data)
+vfu_sgl_read(vfu_ctx_t *vfu_ctx, dma_sg_t *sgl, size_t cnt, void *data)
 {
     assert(vfu_ctx->pending.state == VFU_CTX_PENDING_NONE);
-    return vfu_dma_transfer(vfu_ctx, VFIO_USER_DMA_READ, sg, data);
+
+    /* Not currently implemented. */
+    if (cnt != 1) {
+        return ERROR_INT(ENOTSUP);
+    }
+
+    return vfu_dma_transfer(vfu_ctx, VFIO_USER_DMA_READ, sgl, data);
 }
 
 EXPORT int
-vfu_dma_write(vfu_ctx_t *vfu_ctx, dma_sg_t *sg, void *data)
+vfu_sgl_write(vfu_ctx_t *vfu_ctx, dma_sg_t *sgl, size_t cnt, void *data)
 {
     assert(vfu_ctx->pending.state == VFU_CTX_PENDING_NONE);
-    return vfu_dma_transfer(vfu_ctx, VFIO_USER_DMA_WRITE, sg, data);
+
+    /* Not currently implemented. */
+    if (cnt != 1) {
+        return ERROR_INT(ENOTSUP);
+    }
+
+    return vfu_dma_transfer(vfu_ctx, VFIO_USER_DMA_WRITE, sgl, data);
 }
 
 EXPORT bool

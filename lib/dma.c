@@ -31,7 +31,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <stdio.h>
 #include <sys/param.h>
 
 #include <stddef.h>
@@ -99,7 +98,6 @@ dma_controller_create(vfu_ctx_t *vfu_ctx, size_t max_regions, size_t max_size)
     dma->nregions = 0;
     memset(dma->regions, 0, max_regions * sizeof(dma->regions[0]));
     dma->dirty_pgsize = 0;
-    LIST_INIT(&dma->maps);
 
     return dma;
 }
@@ -171,8 +169,6 @@ MOCK_DEFINE(dma_controller_remove_region)(dma_controller_t *dma,
             dma_unregister(data, &region->info);
             dma->vfu_ctx->in_cb = CB_NONE;
         }
-
-        assert(region->refcnt == 0);
 
         if (region->info.vaddr != NULL) {
             dma_controller_unmap_region(dma, region);
@@ -284,7 +280,8 @@ dirty_page_logging_start_on_region(dma_memory_region_t *region, size_t pgsize)
     if (size < 0) {
         return size;
     }
-    region->dirty_bitmap = calloc(size, sizeof(char));
+
+    region->dirty_bitmap = calloc(size, 1);
     if (region->dirty_bitmap == NULL) {
         return ERROR_INT(errno);
     }
@@ -420,7 +417,7 @@ MOCK_DEFINE(dma_controller_add_region)(dma_controller_t *dma,
 int
 _dma_addr_sg_split(const dma_controller_t *dma,
                    vfu_dma_addr_t dma_addr, uint64_t len,
-                   dma_sg_t *sg, int max_sg, int prot)
+                   dma_sg_t *sg, int max_nr_sgs, int prot)
 {
     int idx;
     int cnt = 0, ret;
@@ -436,7 +433,7 @@ _dma_addr_sg_split(const dma_controller_t *dma,
             while (dma_addr >= region_start && dma_addr < region_end) {
                 size_t region_len = MIN((uint64_t)(region_end - dma_addr), len);
 
-                if (cnt < max_sg) {
+                if (cnt < max_nr_sgs) {
                     ret = dma_init_sg(dma, &sg[cnt], dma_addr, region_len, prot, idx);
                     if (ret < 0) {
                         return ret;
@@ -463,27 +460,11 @@ out:
         // There is still a region which was not found.
         assert(len > 0);
         return ERROR_INT(ENOENT);
-    } else if (cnt > max_sg) {
+    } else if (cnt > max_nr_sgs) {
         cnt = -cnt - 1;
     }
     errno = 0;
     return cnt;
-}
-
-static void
-dma_mark_dirty_sgs(dma_controller_t *dma)
-{
-    struct dma_sg *sg;
-
-    if (dma->dirty_pgsize == 0) {
-        return;
-    }
-
-    LIST_FOREACH(sg, &dma->maps, entry) {
-        if (sg->writeable) {
-            _dma_mark_dirty(dma, &dma->regions[sg->region], sg);
-        }
-    }
 }
 
 int
@@ -524,8 +505,6 @@ dma_controller_dirty_page_logging_start(dma_controller_t *dma, size_t pgsize)
         }
     }
     dma->dirty_pgsize = pgsize;
-
-    dma_mark_dirty_sgs(dma);
 
     vfu_log(dma->vfu_ctx, LOG_DEBUG, "dirty pages: started logging");
 
@@ -574,10 +553,11 @@ dma_controller_dirty_page_get(dma_controller_t *dma, vfu_dma_addr_t addr,
                               uint64_t len, size_t pgsize, size_t size,
                               char *bitmap)
 {
-    int ret;
+    dma_memory_region_t *region;
     ssize_t bitmap_size;
     dma_sg_t sg;
-    dma_memory_region_t *region;
+    size_t i;
+    int ret;
 
     assert(dma != NULL);
     assert(bitmap != NULL);
@@ -587,7 +567,7 @@ dma_controller_dirty_page_get(dma_controller_t *dma, vfu_dma_addr_t addr,
      * is purely for simplifying the implementation. We MUST allow arbitrary
      * IOVAs.
      */
-    ret = dma_addr_to_sg(dma, addr, len, &sg, 1, PROT_NONE);
+    ret = dma_addr_to_sgl(dma, addr, len, &sg, 1, PROT_NONE);
     if (ret != 1 || sg.dma_addr != addr || sg.length != len) {
         return ERROR_INT(ENOTSUP);
     }
@@ -620,17 +600,32 @@ dma_controller_dirty_page_get(dma_controller_t *dma, vfu_dma_addr_t addr,
         return ERROR_INT(EINVAL);
     }
 
-    /*
-     * TODO race condition between resetting bitmap and user calling
-     * vfu_map_sg/vfu_unmap_sg().
-     */
-    memcpy(bitmap, region->dirty_bitmap, size);
+    for (i = 0; i < (size_t)bitmap_size; i++) {
+        uint8_t val = region->dirty_bitmap[i];
+        uint8_t *outp = (uint8_t *)&bitmap[i];
+
+        /*
+         * If no bits are dirty, avoid the atomic exchange. This is obviously
+         * racy, but it's OK: if we miss a dirty bit being set, we'll catch it
+         * the next time around.
+         *
+         * Otherwise, atomically exchange the dirty bits with zero: as we use
+         * atomic or in _dma_mark_dirty(), this cannot lose set bits - we might
+         * miss a bit being set after, but again, we'll catch that next time
+         * around.
+         */
+        if (val == 0) {
+            *outp = 0;
+        } else {
+            uint8_t zero = 0;
+            __atomic_exchange(&region->dirty_bitmap[i], &zero,
+                              outp, __ATOMIC_SEQ_CST);
+        }
+    }
+
 #ifdef DEBUG
     log_dirty_bitmap(dma->vfu_ctx, region, bitmap, size);
 #endif
-    memset(region->dirty_bitmap, 0, size);
-
-    dma_mark_dirty_sgs(dma);
 
     return 0;
 }
