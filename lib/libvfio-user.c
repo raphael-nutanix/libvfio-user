@@ -467,12 +467,18 @@ handle_device_get_region_info(vfu_ctx_t *vfu_ctx, vfu_msg_t *msg)
 EXPORT int
 vfu_create_ioeventfd(vfu_ctx_t *vfu_ctx, uint32_t region_idx, int fd,
                      size_t offset, uint32_t size, uint32_t flags,
-                     uint64_t datamatch)
+                     uint64_t datamatch, int shadow_fd)
 {
     vfu_reg_info_t *vfu_reg;
 
     assert(vfu_ctx != NULL);
     assert(fd >= 0);
+
+#ifndef SHADOW_IOEVENTFD
+    if (shadow_fd != -1) {
+        return ERROR_INT(EINVAL);
+    }
+#endif
 
     if (region_idx >= VFU_PCI_DEV_NUM_REGIONS) {
         return ERROR_INT(EINVAL);
@@ -494,6 +500,7 @@ vfu_create_ioeventfd(vfu_ctx_t *vfu_ctx, uint32_t region_idx, int fd,
     elem->size = size;
     elem->flags = flags;
     elem->datamatch = datamatch;
+    elem->shadow_fd = shadow_fd;
     LIST_INSERT_HEAD(&vfu_reg->subregions, elem, entry);
 
     return 0;
@@ -555,6 +562,7 @@ handle_device_get_region_io_fds(vfu_ctx_t *vfu_ctx, vfu_msg_t *msg)
     ioeventfd_t *sub_reg = NULL;
     size_t nr_sub_reg = 0;
     size_t i = 0;
+    size_t nr_shadow_reg = 0;
 
     assert(vfu_ctx != NULL);
     assert(msg != NULL);
@@ -585,6 +593,9 @@ handle_device_get_region_io_fds(vfu_ctx_t *vfu_ctx, vfu_msg_t *msg)
 
     LIST_FOREACH(sub_reg, &vfu_reg->subregions, entry) {
         nr_sub_reg++;
+        if (sub_reg->shadow_fd != -1) {
+            nr_shadow_reg++;
+        }
     }
 
     if (req->argsz < sizeof(vfio_user_region_io_fds_reply_t) ||
@@ -614,7 +625,8 @@ handle_device_get_region_io_fds(vfu_ctx_t *vfu_ctx, vfu_msg_t *msg)
 
     msg->out.nr_fds = 0;
     if (req->argsz >= reply->argsz) {
-        msg->out.fds = calloc(sizeof(int), max_sent_sub_regions);
+        msg->out.fds = calloc(sizeof(int),
+                              max_sent_sub_regions + nr_shadow_reg);
         if (msg->out.fds == NULL) {
             return -1;
         }
@@ -627,7 +639,13 @@ handle_device_get_region_io_fds(vfu_ctx_t *vfu_ctx, vfu_msg_t *msg)
             ioefd->size = sub_reg->size;
             ioefd->fd_index = add_fd_index(msg->out.fds, &msg->out.nr_fds,
                                         sub_reg->fd);
-            ioefd->type = VFIO_USER_IO_FD_TYPE_IOEVENTFD;
+            if (sub_reg->shadow_fd == -1) {
+                ioefd->type = VFIO_USER_IO_FD_TYPE_IOEVENTFD;
+            } else {
+                ioefd->type = VFIO_USER_IO_FD_TYPE_IOEVENTFD_SHADOW;
+                int ret = add_fd_index(msg->out.fds, &msg->out.nr_fds, sub_reg->shadow_fd);
+                assert(ret == 1);
+            }
             ioefd->flags = sub_reg->flags;
             ioefd->datamatch = sub_reg->datamatch;
 
@@ -1968,6 +1986,22 @@ vfu_setup_device_nr_irqs(vfu_ctx_t *vfu_ctx, enum vfu_dev_irq_type type,
 }
 
 EXPORT int
+vfu_setup_irq_state_callback(vfu_ctx_t *vfu_ctx, enum vfu_dev_irq_type type,
+                             vfu_dev_irq_state_cb_t *cb)
+{
+    assert(vfu_ctx != NULL);
+
+    if (type >= VFU_DEV_NUM_IRQS) {
+        vfu_log(vfu_ctx, LOG_ERR, "Invalid IRQ type index %u", type);
+        return ERROR_INT(EINVAL);
+    }
+
+    vfu_ctx->irq_state_cbs[type] = cb;
+
+    return 0;
+}
+
+EXPORT int
 vfu_setup_device_migration_callbacks(vfu_ctx_t *vfu_ctx,
                                      const vfu_migration_callbacks_t *callbacks,
                                      uint64_t data_offset)
@@ -1998,10 +2032,13 @@ vfu_setup_device_migration_callbacks(vfu_ctx_t *vfu_ctx,
 }
 
 static void
-quiesce_check_allowed(vfu_ctx_t *vfu_ctx)
+quiesce_check_allowed(vfu_ctx_t *vfu_ctx, const char *func)
 {
-    if (!(vfu_ctx->in_cb != CB_NONE || vfu_ctx->quiesce == NULL || !vfu_ctx->quiesced)) {
-        vfu_log(vfu_ctx, LOG_ERR, "illegal function in quiesced state");
+    if (!(vfu_ctx->in_cb != CB_NONE ||
+          vfu_ctx->quiesce == NULL ||
+          !vfu_ctx->quiesced)) {
+        vfu_log(vfu_ctx, LOG_ERR,
+                "illegal function %s() in quiesced state", func);
 #ifdef DEBUG
         abort();
 #endif
@@ -2018,7 +2055,7 @@ vfu_addr_to_sgl(vfu_ctx_t *vfu_ctx, vfu_dma_addr_t dma_addr,
         return ERROR_INT(EINVAL);
     }
 
-    quiesce_check_allowed(vfu_ctx);
+    quiesce_check_allowed(vfu_ctx, __func__);
 
     return dma_addr_to_sgl(vfu_ctx->dma, dma_addr, len, sgl, max_nr_sgs, prot);
 }
@@ -2031,7 +2068,7 @@ vfu_sgl_get(vfu_ctx_t *vfu_ctx, dma_sg_t *sgl, struct iovec *iov, size_t cnt,
         return ERROR_INT(EINVAL);
     }
 
-    quiesce_check_allowed(vfu_ctx);
+    quiesce_check_allowed(vfu_ctx, __func__);
 
     return dma_sgl_get(vfu_ctx->dma, sgl, iov, cnt);
 }
@@ -2043,7 +2080,7 @@ vfu_sgl_mark_dirty(vfu_ctx_t *vfu_ctx, dma_sg_t *sgl, size_t cnt)
         return;
     }
 
-    quiesce_check_allowed(vfu_ctx);
+    quiesce_check_allowed(vfu_ctx, __func__);
 
     return dma_sgl_mark_dirty(vfu_ctx->dma, sgl, cnt);
 }
@@ -2056,7 +2093,7 @@ vfu_sgl_put(vfu_ctx_t *vfu_ctx, dma_sg_t *sgl,
         return;
     }
 
-    quiesce_check_allowed(vfu_ctx);
+    quiesce_check_allowed(vfu_ctx, __func__);
 
     return dma_sgl_put(vfu_ctx->dma, sgl, cnt);
 }

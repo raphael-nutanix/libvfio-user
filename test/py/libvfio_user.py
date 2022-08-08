@@ -194,6 +194,7 @@ VFIO_IOMMU_DIRTY_PAGES_FLAG_GET_BITMAP = (1 << 2)
 
 VFIO_USER_IO_FD_TYPE_IOEVENTFD = 0
 VFIO_USER_IO_FD_TYPE_IOREGIONFD = 1
+VFIO_USER_IO_FD_TYPE_IOEVENTFD_SHADOW = 2
 
 
 # enum vfu_dev_irq_type
@@ -620,14 +621,23 @@ lib.vfu_sgl_put.argtypes = (c.c_void_p, c.POINTER(dma_sg_t),
 
 lib.vfu_create_ioeventfd.argtypes = (c.c_void_p, c.c_uint32, c.c_int,
                                      c.c_size_t, c.c_uint32, c.c_uint32,
-                                     c.c_uint64)
+                                     c.c_uint64, c.c_int32)
 
 lib.vfu_device_quiesced.argtypes = (c.c_void_p, c.c_int)
+
+vfu_dev_irq_state_cb_t = c.CFUNCTYPE(None, c.c_void_p, c.c_uint32,
+                                     c.c_uint32, c.c_bool, use_errno=True)
+lib.vfu_setup_irq_state_callback.argtypes = (c.c_void_p, c.c_int,
+                                             vfu_dev_irq_state_cb_t)
 
 
 def to_byte(val):
     """Cast an int to a byte value."""
     return val.to_bytes(1, 'little')
+
+
+def to_bytes_le(n, length=1):
+    return n.to_bytes(length, 'little')
 
 
 def skip(fmt, buf):
@@ -638,6 +648,9 @@ def skip(fmt, buf):
 def parse_json(json_str):
     """Parse JSON into an object with attributes (instead of using a dict)."""
     return json.loads(json_str, object_hook=lambda d: SimpleNamespace(**d))
+
+
+IOEVENT_SIZE = 8
 
 
 def eventfd(initval=0, flags=0):
@@ -1030,6 +1043,20 @@ def vfu_setup_device_nr_irqs(ctx, irqtype, count):
     return lib.vfu_setup_device_nr_irqs(ctx, irqtype, count)
 
 
+def irq_state(ctx, start, count, mask):
+    pass
+
+
+@vfu_dev_irq_state_cb_t
+def __irq_state(ctx, start, count, mask):
+    irq_state(ctx, start, count, mask)
+
+
+def vfu_setup_irq_state_callback(ctx, irqtype, cb=__irq_state):
+    assert ctx is not None
+    return lib.vfu_setup_irq_state_callback(ctx, irqtype, cb)
+
+
 def vfu_pci_init(ctx, pci_type=VFU_PCI_TYPE_EXPRESS,
                  hdr_type=PCI_HEADER_TYPE_NORMAL):
     assert ctx is not None
@@ -1165,11 +1192,12 @@ def vfu_sgl_put(ctx, sg, iovec, cnt=1):
     return lib.vfu_sgl_put(ctx, sg, iovec, cnt)
 
 
-def vfu_create_ioeventfd(ctx, region_idx, fd, offset, size, flags, datamatch):
+def vfu_create_ioeventfd(ctx, region_idx, fd, offset, size, flags, datamatch,
+                         shadow_fd=-1):
     assert ctx is not None
 
     return lib.vfu_create_ioeventfd(ctx, region_idx, fd, offset, size,
-                                    flags, datamatch)
+                                    flags, datamatch, shadow_fd)
 
 
 def vfu_device_quiesced(ctx, err):
